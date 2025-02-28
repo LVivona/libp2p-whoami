@@ -1,0 +1,40 @@
+[workspace]
+members = ["pwhoami", "protocol/whoami"]
+resolver = "2"
+
+[workspace.package]
+version = "0.0.1"
+rust-version = "1.84.1"
+edition = "2021"
+
+[workspace.dependencies]
+# Network
+# libp2p = { version = "0.55.0", features = [
+#     "tokio",
+#     "tcp",
+#     "quic",
+#     "noise",
+#     "yamux",
+#     "dns",
+#     "identify",
+#     "identity",
+#     "ping",
+#     "macros",
+# ] }
+libp2p-core = { version = "0.43.0" }
+libp2p-swarm = { version = "0.46.0" }
+libp2p-identity = { version = "0.2.10" }
+tokio = { version = "1.43.0", features = ["full"] }
+# Async 
+asynchronous-codec = { version = "0.7.0" }
+chrono = "0.4.39"
+# Logging
+tracing-subscriber = "0.3.19"
+tracing = "0.1.41"
+# Cli
+clap = { version = "4.5.31", features = ["derive"] }
+# Reponse handling
+thiserror = "2"
+
+
+[workspace.lints]
