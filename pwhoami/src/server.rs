@@ -1,3 +1,4 @@
+use clap::Parser;
 use std::{error::Error, time::Duration};
 
 use libp2p::{futures::StreamExt, identity::Keypair, noise, tcp, yamux};
@@ -7,8 +8,24 @@ use tracing_subscriber::EnvFilter;
 
 use whoami::{send_response, Response, WHOAMI_PROTOCOL};
 
+#[derive(Parser, Debug)]
+#[command(version, about = "Libp2p Whoami Server", long_about = None)]
+struct Args {
+
+    #[arg(short, long)]
+    f_name : String,
+    
+    #[arg(short, long)]
+    l_name : Option<String>,
+
+    #[arg(short, long)]
+    port: u16,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let args = Args::parse();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::builder()
@@ -33,17 +50,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(10)))
         .build();
 
-        
-    server.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
-    server.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
-    // both the client and the server require handling request
-
+    // listening addresses
+    server.listen_on(format!("/ip4/0.0.0.0/udp/{}/quic-v1", args.port).parse()?)?;
+    server.listen_on(format!("/ip4/0.0.0.0/tcp/{}", args.port).parse()?)?;
+    
     let mut incoming_stream = server.behaviour().new_control().accept(WHOAMI_PROTOCOL)?;
 
+    // static response request
     let response = Response::new(
         whoami::UserAgent::Server,
-        "Luca".into(),
-        Some("Vivona".into()),
+        args.f_name,
+        args.l_name
     );
     // handle incoming connection from the the client
 
@@ -70,10 +87,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
             libp2p::swarm::SwarmEvent::NewListenAddr { address, .. } => {
                 let addr = address.with_p2p(*server.local_peer_id()).unwrap();
                 tracing::info!(%addr);
-            },
+            }
 
             event => tracing::trace!(?event),
         }
     }
-
 }
