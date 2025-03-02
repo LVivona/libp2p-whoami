@@ -1,0 +1,37 @@
+[package]
+name = "pwhoami"
+version = { workspace = true }
+edition = { workspace = true }
+
+[[bin]]
+name = "whoami-client"
+path = "src/client.rs"
+
+[[bin]]
+name = "whoami-server"
+path = "src/server.rs"
+
+[lib]
+name = "whoami"
+path = "src/lib.rs"
+
+[dependencies]
+libp2p = { version = "0.55.0", features = [
+    "tokio",
+    "tcp",
+    "quic",
+    "noise",
+    "yamux",
+    "identify",
+    "dns",
+    "ping",
+    "macros",
+] }
+libp2p-stream = "0.3.0-alpha"
+clap = { workspace = true }
+chrono = { workspace = true, features = ["serde"]}
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+tracing = { workspace = true }
+tokio = { workspace = true }
+serde = { version = "1.0", features = ["derive"] }
+cbor4ii = {version = "=1.0.0", features = ["serde1"]}

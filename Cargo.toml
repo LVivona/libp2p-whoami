@@ -1,5 +1,5 @@
 [workspace]
-members = ["pwhoami", "protocol/whoami"]
+members = ["pwhoami"]
 resolver = "2"
 
 [workspace.package]
@@ -8,19 +8,6 @@ rust-version = "1.84.1"
 edition = "2021"
 
 [workspace.dependencies]
-# Network
-# libp2p = { version = "0.55.0", features = [
-#     "tokio",
-#     "tcp",
-#     "quic",
-#     "noise",
-#     "yamux",
-#     "dns",
-#     "identify",
-#     "identity",
-#     "ping",
-#     "macros",
-# ] }
 libp2p-core = { version = "0.43.0" }
 libp2p-swarm = { version = "0.46.0" }
 libp2p-identity = { version = "0.2.10" }
