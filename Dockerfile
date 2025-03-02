@@ -11,4 +11,4 @@ RUN cargo build --release
 
 ENV RUST_LOG=INFO
 # Specify the command to run the app
-CMD ["cargo", "run", "--release", "--", "node", "-f", "luca", "-l", "vivona"]
+CMD ["cargo", "run", "--package", "pwhoami", "--bin", "whoami-server" "--", "-p", "4040" "-f", "Luca"]
