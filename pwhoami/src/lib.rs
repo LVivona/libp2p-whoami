@@ -14,7 +14,7 @@ use cbor4ii::serde::from_slice;
 
 pub const WHOAMI_PROTOCOL: StreamProtocol = StreamProtocol::new("/whoami/0.0.1");
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum UserAgent {
     Client,
     Server,
@@ -97,7 +97,7 @@ impl Request {
 impl Codec for Request {}
 
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Response {
     #[serde(deserialize_with = "deserialize_user_agent")]
     user_agent: UserAgent,
@@ -120,7 +120,7 @@ impl Codec for Response {}
 pub async fn send_request(
     mut stream: Stream,
     reposne: &Request,
-) -> io::Result<()> {
+) -> io::Result<Response> {
     let bytes = reposne.encode()?;
     tracing::info!("Sending request...");
     stream.write_all(&bytes).await?;
@@ -152,7 +152,7 @@ pub async fn send_request(
             // Wait a moment before closing to ensure peer has processed everything
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             stream.close().await?;
-            return Ok(());
+            return Ok(response);
         }
     }
 
@@ -162,7 +162,7 @@ pub async fn send_request(
             Ok(response) => {
                 tracing::info!(?total_bytes, ?response, "Received valid response at EOF");
                 stream.close().await?;
-                Ok(())
+                Ok(response)
             }
             Err(e) => {
                 let err = io::Error::new(
@@ -187,7 +187,31 @@ pub async fn send_response(
     response: &Response,
 ) -> io::Result<()> {
     tracing::debug!("Request received, preparing response...");
+    
+    let mut buf = vec![0; 1024];
+    let mut total_bytes = 0;
 
+        // Read chunks until we have data or encounter an error/EOF
+    loop {
+            match stream.read(&mut buf[total_bytes..]).await {
+                Ok(0) => break, // EOF reached
+                Ok(n) => {
+                    total_bytes += n;
+                    // Resize buffer if needed
+                    if total_bytes >= buf.len() {
+                        buf.resize(buf.len() * 2, 0);
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+    
+            // Try to parse what we have so far
+            if let Ok(response) = from_slice::<Request>(&buf[..total_bytes]) {
+                tracing::info!(?total_bytes, ?response, "Received valid response");
+                break;
+            }
+    }
+    
     let bytes = response.encode()?;
 
     stream.write_all(&bytes).await?;
@@ -223,8 +247,8 @@ pub async fn on_connection(
     };
 
     match send_request(stream, &request).await {
-        Ok(_) => {
-            tracing::info!(%peer, ?request, "Request completed successfully");
+        Ok(res) => {
+            tracing::info!(%peer, ?res, "Request completed successfully");
             let _ = tx.send(true).await;
         }
         Err(e) => tracing::warn!(%peer, ?request, "Echo protocol failed: {}", e),

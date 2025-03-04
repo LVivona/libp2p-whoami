@@ -1,5 +1,6 @@
 use clap::Parser;
-use std::{error::Error, time::Duration};
+use tokio::sync::Semaphore;
+use std::{error::Error, sync::Arc, time::Duration};
 
 use libp2p::{futures::StreamExt, noise, tcp, yamux};
 use libp2p_stream as stream;
@@ -21,8 +22,8 @@ struct Args {
     #[arg(short, long)]
     port: u16,
 
-    #[arg(short, long)]
-    dns : bool
+    #[arg(short, long, default_value = "7")]
+    workers : u8
 }
 
 #[tokio::main]
@@ -76,26 +77,39 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // libp2p doesn't care how you handle incoming streams but you _must_ handle them somehow.
     // To mitigate DoS attacks, libp2p will internally drop incoming streams if your application
     // cannot keep up processing them.
-    tokio::spawn(async move {
+    let max_concurrent_connections = 100; // Limit max concurrent streams
+    let semaphore = Arc::new(Semaphore::new(max_concurrent_connections));
+    tokio::spawn( {
         // REF: ``rust-libp2p/examples/stream/sr``
         // This loop handles incoming streams _sequentially_ but that doesn't have to be the case.
         // You can also spawn a dedicated task per stream if you want to.
         // Be aware that this breaks backpressure though as spawning new tasks is equivalent to an
         // unbounded buffer. Each task needs memory meaning an aggressive remote peer may
         // force you OOM this way.
-        while let Some((peer, stream)) = incoming_stream.next().await {
-            // On incoming stream take the stream handed from the incoming_stream
-            // send [`Repsonse`] to said stream
-            match send_response(stream, &response).await {
-                Ok(_) => {
-                    tracing::info!(%peer, "Reponse sent");
-                }
-                Err(e) => {
-                    println!("Echo failed {e}");
-                    tracing::warn!(%peer, "Echo failed: {e}");
+        let semaphore = Arc::clone(&semaphore);
+        async move {
+
+            while let Some((peer, stream)) = incoming_stream.next().await {
+                let permit = semaphore.clone().acquire_owned().await;
+                
+                // If permit is None, we've hit the limit
+                if permit.is_err() {
+                    tracing::warn!(%peer, "Connection limit reached, dropping");
                     continue;
                 }
-            }
+
+                // On incoming stream take the stream handed from the incoming_stream
+                // send [`Repsonse`] to said stream
+                match send_response(stream, &response).await {
+                            Ok(_) => {
+                                tracing::info!(%peer, "Reponse sent");
+                            }
+                            Err(e) => {
+                                println!("Echo failed {e}");
+                                tracing::warn!(%peer, "Echo failed: {e}");
+                            }
+                }
+            } 
         }
     });
 
