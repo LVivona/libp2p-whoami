@@ -182,24 +182,20 @@ pub async fn send_request(
     }
 }
 
-
-pub async fn send_response<ResponseT: Serialize>(
+pub async fn send_response(
     mut stream: Stream,
-    response: &ResponseT,
+    response: &Response,
 ) -> io::Result<()> {
     tracing::debug!("Request received, preparing response...");
 
-    let bytes = match cbor4ii::serde::to_vec(Vec::new(), response) {
-        Ok(bytes) => bytes,
-        Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
-    };
+    let bytes = response.encode()?;
 
     stream.write_all(&bytes).await?;
     stream.flush().await?;
     tracing::debug!("Response sent successfully");
 
-    // Wait a moment before closing to ensure peer has processed everything
-    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+    // close stream as we are finised streaming
+    stream.close().await?;
 
     Ok(())
 }
