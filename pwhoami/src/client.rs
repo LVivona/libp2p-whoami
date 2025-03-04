@@ -34,15 +34,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // public/private key of my node.
     let keypair = Keypair::generate_ed25519();
     let mut client = SwarmBuilder::with_existing_identity(keypair)
-        .with_tokio()
-        .with_tcp(
+        .with_tokio()               // - tokio runtime enviorment
+        .with_tcp(                  // - tcp over ip network communication layer
             tcp::Config::new(),
-            noise::Config::new,
+            noise::Config::new, 
             yamux::Config::default,
-        )?
-        .with_quic()
-        .with_behaviour(|_| stream::Behaviour::new())?
-        .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(10)))
+        )?  
+        .with_quic()                // - quic, udp over ip network communciation layer
+        .with_behaviour(|_| stream::Behaviour::new())?  // - bytes stream behavour
+        .with_swarm_config(|c| 
+            c.with_idle_connection_timeout(Duration::from_secs(10)))
         .build();
 
     client.listen_on("/ip4/0.0.0.0/udp/0/quic-v1".parse()?)?;
@@ -60,15 +61,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     tokio::spawn(on_connection(
         peer_id,
         client.behaviour().new_control(),
-        Request {
-            user_agent: whoami::UserAgent::Client,
-        },
+        Request::default(),
         tx,
     ));
-
     loop {
         tokio::select! {
-            result = rx.recv() => {
+            _ = rx.recv() => {
                 tracing::info!("Finished");
                 return Ok(());
             },
@@ -84,5 +82,4 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    Ok(())
 }

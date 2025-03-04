@@ -70,6 +70,33 @@ pub struct Request {
     pub user_agent: UserAgent,
 }
 
+
+trait Codec 
+    where Self : Sized + Serialize + Debug
+{
+
+    /// encode Request into [`Vec<u8>`] where it will 
+    /// then be sent over the network via stream behavoir. 
+    fn encode(&self) -> io::Result<Vec<u8>> {
+        match cbor4ii::serde::to_vec(Vec::new(), self) {
+        Ok(bytes) => return Ok(bytes),
+            Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
+        }
+    }
+}
+
+impl Request {
+
+    pub fn default() -> Self {
+        Self {
+            user_agent: UserAgent::Client,
+        }
+    }
+}
+
+impl Codec for Request {}
+
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Response {
     #[serde(deserialize_with = "deserialize_user_agent")]
@@ -88,15 +115,13 @@ impl Response {
     }
 }
 
-pub async fn send_request<RequestT: Serialize>(
-    mut stream: Stream,
-    request: &RequestT,
-) -> io::Result<()> {
-    let bytes = match cbor4ii::serde::to_vec(Vec::new(), request) {
-        Ok(bytes) => bytes,
-        Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string())),
-    };
+impl Codec for Response {}
 
+pub async fn send_request(
+    mut stream: Stream,
+    reposne: &Request,
+) -> io::Result<()> {
+    let bytes = reposne.encode()?;
     tracing::info!("Sending request...");
     stream.write_all(&bytes).await?;
     stream.flush().await?; // Added flush to ensure data is sent
@@ -157,58 +182,12 @@ pub async fn send_request<RequestT: Serialize>(
     }
 }
 
-pub async fn read_bytes(mut stream: Stream) -> io::Result<()> {
-    // Use a fixed-size buffer for reading and track actual bytes read
-    let mut buffer = vec![0u8; 4096];
-    let mut total_bytes = 0;
-
-    // Read chunks until we have data or encounter an error/EOF
-    loop {
-        match stream.read(&mut buffer[total_bytes..]).await {
-            Ok(0) => break, // EOF reached
-            Ok(n) => {
-                total_bytes += n;
-                // Resize buffer if needed
-                if total_bytes >= buffer.len() {
-                    buffer.resize(buffer.len() * 2, 0);
-                }
-            }
-            Err(e) => return Err(e),
-        }
-    }
-
-    if total_bytes > 0 {
-        match from_slice::<Response>(&buffer[..total_bytes]) {
-            Ok(response) => {
-                tracing::info!(?total_bytes, ?response, "Received and parsed response");
-                // Wait a moment before closing to ensure peer has processed everything
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                stream.close().await?;
-                Ok(())
-            }
-            Err(e) => {
-                let err = io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("Failed to deserialize response: {}", e),
-                );
-                tracing::warn!(?total_bytes, ?err, "Deserialization failed");
-                stream.close().await?;
-                Err(err)
-            }
-        }
-    } else {
-        let err = io::Error::new(io::ErrorKind::UnexpectedEof, "No data received");
-        tracing::warn!(?err);
-        stream.close().await?;
-        Err(err)
-    }
-}
 
 pub async fn send_response<ResponseT: Serialize>(
     mut stream: Stream,
     response: &ResponseT,
 ) -> io::Result<()> {
-    tracing::info!("Request received, preparing response...");
+    tracing::debug!("Request received, preparing response...");
 
     let bytes = match cbor4ii::serde::to_vec(Vec::new(), response) {
         Ok(bytes) => bytes,
@@ -217,19 +196,18 @@ pub async fn send_response<ResponseT: Serialize>(
 
     stream.write_all(&bytes).await?;
     stream.flush().await?;
-    tracing::info!("Response sent successfully");
+    tracing::debug!("Response sent successfully");
 
     // Wait a moment before closing to ensure peer has processed everything
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    // stream.close().await?;
+    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
     Ok(())
 }
 
-pub async fn on_connection<RequestT: Serialize + Debug>(
+pub async fn on_connection(
     peer: PeerId,
     mut control: stream::Control,
-    request: RequestT,
+    request: Request,
     tx: tokio::sync::mpsc::Sender<bool>,
 ) {
     tracing::info!(%peer, "Attempting to open stream");
@@ -248,7 +226,7 @@ pub async fn on_connection<RequestT: Serialize + Debug>(
         }
     };
 
-    match send_request::<RequestT>(stream, &request).await {
+    match send_request(stream, &request).await {
         Ok(_) => {
             tracing::info!(%peer, ?request, "Request completed successfully");
             let _ = tx.send(true).await;
