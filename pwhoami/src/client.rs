@@ -28,20 +28,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
         )
         .init();
 
-    // address to the node I want to call
-    let addr: Multiaddr = args.address.parse()?;
-
+    // address to the node I want `[Ne]`
+    let addr: Multiaddr = match args.address.parse() {
+        Ok(addr) => addr,
+        Err(_) => {
+            // Fall back to custom parsing with the whoami module
+            let address_str = args.address;
+            whoami::from_url("whoami", &address_str, false, 4040)?
+        }
+    };
     // public/private key of my node.
     let keypair = Keypair::generate_ed25519();
     let mut client = SwarmBuilder::with_existing_identity(keypair)
-        .with_tokio()               // - tokio runtime enviorment
-        .with_tcp(                  // - tcp over ip network communication layer
+        .with_tokio()               // tokio runtime enviorment
+        .with_tcp(                  // tcp over ip network communication layer
             tcp::Config::new(),
             noise::Config::new, 
             yamux::Config::default,
-        )?  
-        .with_quic()                // - quic, udp over ip network communciation layer
-        .with_behaviour(|_| stream::Behaviour::new())?  // - bytes stream behavour
+        )?
+        .with_quic()                // quic, udp over ip network communciation layer
+        .with_dns()?
+        .with_behaviour(|_| stream::Behaviour::new())?  // bytes stream behavour
         .with_swarm_config(|c| 
             c.with_idle_connection_timeout(Duration::from_secs(10)))
         .build();
@@ -64,6 +71,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Request::default(),
         tx,
     ));
+
     loop {
         tokio::select! {
             _ = rx.recv() => {
@@ -72,10 +80,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
             },
             event = client.select_next_some() => {
                 match event {
-                    libp2p::swarm::SwarmEvent::NewListenAddr { address, .. } => {
+                    
+                    libp2p::swarm::SwarmEvent::NewListenAddr {address, .. } => {
                         let listen_address = address.with_p2p(*client.local_peer_id()).unwrap();
                         tracing::info!(%listen_address);
-                    }
+                    },  
                     event => tracing::trace!(?event),
                 }
             }

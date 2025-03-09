@@ -1,16 +1,16 @@
 use libp2p::{
-    futures::{AsyncReadExt, AsyncWriteExt},
-    PeerId, Stream, StreamProtocol,
+    futures::{AsyncReadExt, AsyncWriteExt}, multiaddr::{FromUrlErr, Protocol}, Multiaddr, PeerId, Stream, StreamProtocol
 };
 use libp2p_stream as stream;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::{
-    fmt::{self, Debug},
-    io,
-    str::FromStr,
+    fmt::{self, Debug}, io, iter, net::IpAddr, str::FromStr
 };
 
 use cbor4ii::serde::from_slice;
+
+use url::Url;
+
 
 pub const WHOAMI_PROTOCOL: StreamProtocol = StreamProtocol::new("/whoami/0.0.1");
 
@@ -85,17 +85,15 @@ trait Codec
     }
 }
 
-impl Request {
+impl Codec for Request {}
 
-    pub fn default() -> Self {
+impl Default for  Request {
+    fn default() -> Self {
         Self {
             user_agent: UserAgent::Client,
         }
     }
 }
-
-impl Codec for Request {}
-
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Response {
@@ -106,9 +104,9 @@ pub struct Response {
 }
 
 impl Response {
-    pub fn new(agent: UserAgent, f_name: String, l_name: Option<String>) -> Self {
+    pub fn new(f_name: String, l_name: Option<String>) -> Self {
         Self {
-            user_agent: agent,
+            user_agent: UserAgent::Server,
             f_name,
             l_name,
         }
@@ -252,5 +250,67 @@ pub async fn on_connection(
             let _ = tx.send(true).await;
         }
         Err(e) => tracing::warn!(%peer, ?request, "Echo protocol failed: {}", e),
+    }
+}
+
+
+pub fn from_url<'a>(name: &'a str, url: &str, lossy: bool, default_port: u16) -> Result<Multiaddr, FromUrlErr> {
+    let url = Url::parse(url).map_err(|_| FromUrlErr::BadUrl)?;
+    
+    if url.scheme() != name {
+        return Err(FromUrlErr::UnsupportedScheme);
+    }
+    
+    let port = Protocol::Tcp(url.port().unwrap_or(default_port));
+    let ip = match url.host_str() {
+        Some(hostname) => match hostname.parse::<IpAddr>() {
+            Ok(ip) => Protocol::from(ip),
+            Err(_) => Protocol::Dns(hostname.to_string().into()),
+        },
+        None => return Err(FromUrlErr::BadUrl),
+    };
+    
+    if !lossy
+        && (!url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some())
+    {
+        return Err(FromUrlErr::InformationLoss);
+    }
+    
+    // Create the initial multiaddr with IP and port
+    let mut addr = iter::once(ip).chain(iter::once(port)).collect::<Multiaddr>();
+    
+    // Check for p2p peer ID in the path
+    let path = url.path();
+    
+    // Cleaner way to check for p2p peer ID
+    if let Some(peer_id) = extract_peer_id(path) {
+        // Add the peer ID protocol to the multiaddr
+        addr.push(Protocol::P2p(peer_id));
+    } else if !lossy && path != "/" && !path.is_empty() {
+        // Only return error if path exists and it's not a p2p path
+        return Err(FromUrlErr::InformationLoss);
+    }
+    
+    Ok(addr)
+}
+
+// Helper function to extract peer ID from path
+fn extract_peer_id(path: &str) -> Option<PeerId> {
+    // Split the path into segments
+    let segments: Vec<&str> = path.split('/')
+        .filter(|s| !s.is_empty())
+        .collect();
+    
+    // Check if the path follows the pattern /p2p/<peer_id>
+    if segments.len() == 2 && segments[0] == "p2p" {
+        match PeerId::from_str(segments[1]) {
+            Ok(peer_id) => Some(peer_id),
+            Err(_) => None,
+        }
+    } else {
+        None
     }
 }
