@@ -98,9 +98,9 @@ impl Default for  Request {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Response {
     #[serde(deserialize_with = "deserialize_user_agent")]
-    user_agent: UserAgent,
-    f_name: String,
-    l_name: Option<String>,
+    pub user_agent: UserAgent,
+    pub f_name: String,
+    pub l_name: Option<String>,
 }
 
 impl Response {
@@ -226,7 +226,7 @@ pub async fn on_connection(
     peer: PeerId,
     mut control: stream::Control,
     request: Request,
-    tx: tokio::sync::mpsc::Sender<bool>,
+    tx: tokio::sync::mpsc::Sender<Response>,
 ) {
     tracing::info!(%peer, "Attempting to open stream");
     let stream = match control.open_stream(peer, WHOAMI_PROTOCOL).await {
@@ -247,7 +247,7 @@ pub async fn on_connection(
     match send_request(stream, &request).await {
         Ok(res) => {
             tracing::info!(%peer, ?res, "Request completed successfully");
-            let _ = tx.send(true).await;
+            let _ = tx.send(res).await;
         }
         Err(e) => tracing::warn!(%peer, ?request, "Echo protocol failed: {}", e),
     }

@@ -37,11 +37,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .from_env()?,
         )
         .init();
-
+    
+    // build a swarm object with Trait, [`NetworkBehaviour`]
+    // - tokio runtime
+    // - tcp build ontop of IP
+    // - quic & udp build ontop of IP
+    // - only stream behaviour
+    // - connection max idle time 10sec
     let mut server  = libp2p::SwarmBuilder::with_new_identity() 
-        .with_tokio()   // tokio runtime
+        .with_tokio()   
         .with_tcp(      
-            tcp::Config::default(), // tcp Config defautlt
+            tcp::Config::default(),
             noise::Config::new,     
             yamux::Config::default,
         )? 
@@ -61,7 +67,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let last_name = args.l_name;
     // static response request
     let response = Response::new(
-        whoami::UserAgent::Server,
         first_name,
         last_name
     );
@@ -121,8 +126,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     libp2p::swarm::SwarmEvent::NewListenAddr { address, .. } => {
                         let addr = address.with_p2p(*server.local_peer_id()).unwrap();
                         tracing::info!(%addr);
-                    }
-        
+                    },
                     event => tracing::trace!(?event),
                 }
             }

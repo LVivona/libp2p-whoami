@@ -3,10 +3,11 @@ use libp2p::futures::StreamExt;
 use libp2p::{identity::Keypair, multiaddr::Protocol, Multiaddr, SwarmBuilder};
 use libp2p::{noise, tcp, yamux};
 use libp2p_stream as stream;
+use std::io::Write;
 use std::{error::Error, time::Duration};
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::EnvFilter;
-use whoami::{on_connection, Request};
+use whoami::{on_connection, Request, Response};
 
 #[derive(Parser, Debug)]
 #[command(version, about = "Libp2p Whoami Client", long_about = None)]
@@ -14,6 +15,9 @@ struct Args {
     /// Multiaddr to connect to
     #[arg(short, long)]
     address: String,
+
+    #[arg(short, long, default_value = "false")]
+    pretty_print : bool
 }
 
 #[tokio::main]
@@ -64,7 +68,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Using the peer_id, that we used to dial, we should be expecting
     // a stream to which we must handle to send, and recive our data.
-    let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<Response>(1024);
     tokio::spawn(on_connection(
         peer_id,
         client.behaviour().new_control(),
@@ -74,8 +78,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     loop {
         tokio::select! {
-            _ = rx.recv() => {
+            Some(res) = rx.recv() => {
                 tracing::info!("Finished");
+                if args.pretty_print {
+                    let mut stdout = std::io::stdout().lock();
+                    let _ = stdout.write(&format!("{:=^50}\n\n", " [whoami] ").into_bytes())?;
+                    let _ = stdout.write_fmt(format_args!("First Name:{:^10}\n", res.f_name))?;
+                    if let Some(l_name) = res.l_name {
+                        let _ = stdout.write_fmt(format_args!("Last Name:{:^10}\n\n", l_name))?;
+                    }
+                    let _ = stdout.write(&format!("{:=<50}\n", "").into_bytes())?;
+                } else {
+                    println!("{:?}", res);
+                }
+                
                 return Ok(());
             },
             event = client.select_next_some() => {
